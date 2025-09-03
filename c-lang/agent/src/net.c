@@ -18,6 +18,7 @@
 #include <netinet/in.h>
 #include <pthread.h> // Include the pthread library
 #include "net.h"
+#include <errno.h>
 
 #define AUTH_CODE "NEONC2" // Authentication code for the agent
 #define NETIN_HEADERSIZE sizeof(AUTH_CODE) // Size of the header for incoming data
@@ -27,10 +28,34 @@ static net_client_handler_t g_client_handler = NULL;
 void *handle_client_thread(void *socket_desc_ptr); // Forward declaration
 
 bool test_net_feature() {
-    // This function is a placeholder for testing the network feature.
-    // It can be expanded to include actual network communication tests.
-    printf("[TEST] Network feature test executed successfully.\n");
-    return true; // Indicate that the test passed
+
+        int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_fd < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    // Attempt to bind to the port
+    if (bind(sock_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        // Check if the specific error is "Address already in use"
+        if (errno == EADDRINUSE) {
+            printf("❌ Port %d is already in use.\n", PORT);
+        } else {
+            // Some other error occurred
+            perror("❌ bind failed");
+        }
+        close(sock_fd);
+        return false;
+    }
+
+    printf("✅ Port %d is available and has been successfully bound.\n", PORT);
+    close(sock_fd);
+    return true;
 }
 
 bool net_init(net_client_handler_t callback) {
