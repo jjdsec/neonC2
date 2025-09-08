@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -26,8 +27,31 @@ type AgentInfo struct {
 	PrivateKey *rsa.PrivateKey `json:"-"`
 }
 
-// ... (The rest of the agent code from the previous step remains the same) ...
-// ... (No changes are needed below this line for the agent template) ...
+func beaconLoop() {
+	for {
+		// In a real scenario, you would add random "jitter" to this sleep time
+		// to avoid all agents checking in at the exact same time.
+		time.Sleep(10 * time.Second)
+		log.Printf("Beaconing to server...")
+
+		// The agent identifies itself to the server using its UUID.
+		beaconURL := fmt.Sprintf("%s/beacon?uuid=%s", serverURL, agentInfo.UUID)
+		resp, err := http.Get(beaconURL)
+		if err != nil {
+			log.Printf("Error beaconing: %v", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		// For now, we just log the server's response.
+		// In the next step, this is where we would decode and execute tasks.
+		if resp.StatusCode == http.StatusNoContent {
+			log.Println("No new tasks.")
+		} else {
+			log.Println("Received a response from server (task processing to be added).")
+		}
+	}
+}
 
 type RegisterRequest struct {
 	Hostname  string `json:"hostname"`
@@ -74,9 +98,10 @@ func main() {
 		log.Printf("Agent identity loaded. UUID: %s", agentInfo.UUID)
 	}
 
-	log.Println("Agent running. Beaconing will start here in the next step.")
-	// Keep the agent running to simulate a real agent
-	select {}
+	log.Println("Agent running.")
+
+	beaconLoop()
+	log.Println("Agent exiting.")
 }
 
 func loadOrGenerateAgentKey(file string) (*rsa.PrivateKey, error) {

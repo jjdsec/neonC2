@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath" // Make sure this is imported
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,7 +45,7 @@ type RegisterResponse struct {
 	UUID uuid.UUID `json:"uuid"`
 }
 
-// CORRECTED: This function now creates a full Go module for the agent build.
+// This function now creates a full Go module for the agent build.
 func buildAgents(config Config) error {
 	log.Println("Starting agent build process...")
 	buildDir := "./build"
@@ -78,14 +78,12 @@ func buildAgents(config Config) error {
 		return err
 	}
 
-	// NEW: Create a go.mod file for the agent.
 	tmpGoModFile := filepath.Join(tmpBuildDir, "go.mod")
-	// Using Go 1.22, you can adjust this if needed.
 	if err := os.WriteFile(tmpGoModFile, []byte("module tempagent\n\ngo 1.22"), 0644); err != nil {
 		return err
 	}
 
-	// NEW: Run 'go mod tidy' to fetch dependencies.
+	// Run 'go mod tidy' to fetch dependencies.
 	log.Println("Running 'go mod tidy' for agent dependencies...")
 	cmdTidy := exec.Command("go", "mod", "tidy")
 	cmdTidy.Dir = tmpBuildDir // Run from the temp directory
@@ -97,7 +95,8 @@ func buildAgents(config Config) error {
 	targets := map[string]string{
 		"windows/amd64": "agent.exe",
 		"linux/amd64":   "agent",
-		"darwin/amd64":  "agent_mac",
+		"darwin/amd64":  "agent_mac_intel",
+		"darwin/arm64":  "agent_mac_apple_silicon",
 	}
 
 	for target, outputName := range targets {
@@ -156,11 +155,42 @@ func main() {
 	fs := http.FileServer(http.Dir("./build"))
 	r.Handle("/agents/*", http.StripPrefix("/agents/", fs))
 
+	r.Get("/beacon", beaconHandler)
+
 	serverAddr := ":" + config.Port
 	log.Printf("Server starting on %s...", serverAddr)
 	if err := http.ListenAndServe(serverAddr, r); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
+}
+
+func beaconHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the agent's UUID from the query parameter.
+	agentUUID, err := uuid.Parse(r.URL.Query().Get("uuid"))
+	if err != nil {
+		http.Error(w, "Invalid UUID", http.StatusBadRequest)
+		return
+	}
+
+	// Update the agent's 'last_seen' time in the database.
+	stmt, err := db.Prepare("UPDATE agents SET last_seen = ? WHERE uuid = ?")
+	if err != nil {
+		log.Printf("Error preparing update statement: %v", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(time.Now(), agentUUID.String()); err != nil {
+		log.Printf("Error updating last_seen for agent %s: %v", agentUUID, err)
+		// We don't return an error to the agent, just log it.
+	}
+
+	log.Printf("Received beacon from agent: %s", agentUUID)
+
+	// For now, we tell the agent there are no new tasks.
+	// In the next steps, we'll check a task queue here.
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func loadOrGenerateConfig() (Config, error) {
