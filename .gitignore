@@ -1,7 +1,6 @@
 .vscode
 .py-venv
-server_public.pem
-server_private.pem
-server.conf
+*.pem
+*.conf
 build/
-agents.db
+*.db

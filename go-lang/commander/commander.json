@@ -1,0 +1,6 @@
+{
+  "server_url": "https://localhost:8443",
+  "api_key": "921e5d974f44309005df5027fa03dfb4f4d880c84470c9f8ab2ad02dd2eb8716",
+  "cert_file": "cert.pem",
+  "skip_tls_verify": true
+}
