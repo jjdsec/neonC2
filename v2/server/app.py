@@ -335,6 +335,20 @@ def api_create_command(host_id):
                 'message': 'Deregister command queued. Client will delete entry and exit.',
                 'command': command.to_dict()
             }), 201, {'Content-Type': 'application/json'}
+        elif cmd_str == '/delete':
+            # Create a command record so client receives it
+            command = Command(
+                host_id=host_id,
+                command=cmd_str,
+                status='pending'
+            )
+            db.session.add(command)
+            db.session.commit()
+            return json.dumps({
+                'success': True,
+                'message': 'Delete command queued. Client will deregister, delete executable, and exit.',
+                'command': command.to_dict()
+            }), 201, {'Content-Type': 'application/json'}
         elif cmd_str.startswith('/set-idle-timeout'):
             # Parse: /set-idle-timeout 5
             try:
@@ -757,4 +771,4 @@ def init_db():
 # This prevents issues with Flask CLI commands
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    app.run(debug=False, host='0.0.0.0', port=8080)

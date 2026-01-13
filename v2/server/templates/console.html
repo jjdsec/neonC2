@@ -32,7 +32,9 @@
         <div class="console-line">NeonC2 Console initialized{% if host %} for {{ host.hostname }}{% endif %}...</div>
         {% if host %}
         <div class="console-line info">Available commands:</div>
+        <div class="console-line info">  cd [directory] - Change working directory (stateful)</div>
         <div class="console-line info">  /deregister - Deregister and exit client</div>
+        <div class="console-line info">  /delete - Deregister, delete executable, and exit client</div>
         <div class="console-line info">  /set-idle-timeout &lt;cycles&gt; - Set idle timeout (default: 5)</div>
         <div class="console-line info">  /set-sync-frequency &lt;seconds&gt; - Set sync frequency (default: 5)</div>
         {% if commands %}
@@ -281,6 +283,17 @@
         border-color: #667eea;
     }
 
+    .console-input.disabled,
+    .send-button.disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        background: #ccc;
+    }
+
+    .console-input.disabled {
+        background: #f5f5f5;
+    }
+
     .send-button {
         padding: 12px 24px;
         background: #667eea;
@@ -426,12 +439,28 @@
             }
         }
 
+        function setInputEnabled(enabled) {
+            consoleInput.disabled = !enabled;
+            sendButton.disabled = !enabled;
+            if (enabled) {
+                consoleInput.classList.remove('disabled');
+                sendButton.classList.remove('disabled');
+                consoleInput.focus();
+            } else {
+                consoleInput.classList.add('disabled');
+                sendButton.classList.add('disabled');
+            }
+        }
+
         async function sendCommand() {
             const command = consoleInput.value.trim();
             if (!command) {
                 // Don't do anything if command is empty
                 return;
             }
+
+            // Disable input while command is processing
+            setInputEnabled(false);
 
             // Reset history position BEFORE adding to history
             // This ensures we're at "new" state when the next command is sent
@@ -464,13 +493,20 @@
                     // Poll for command results (only if it's a real command, not special server commands)
                     if (data.command.id && data.command.id !== 'deregister') {
                         pollCommandResult(hostId, data.command.id);
+                    } else {
+                        // Special commands complete immediately, re-enable input
+                        setInputEnabled(true);
                     }
                 } else {
                     const error = await response.json();
                     addConsoleLine('Error: ' + (error.error || 'Failed to send command'), 'error');
+                    // Re-enable input on error
+                    setInputEnabled(true);
                 }
             } catch (error) {
                 addConsoleLine('Error: ' + error.message, 'error');
+                // Re-enable input on error
+                setInputEnabled(true);
             }
             {% else %}
             addConsoleLine('Error: No host selected. Please select a host from the hosts page.', 'error');
@@ -557,10 +593,20 @@
         {% endif %}
 
         // Set up event listeners
-        sendButton.addEventListener('click', sendCommand);
+        sendButton.addEventListener('click', () => {
+            if (!sendButton.disabled) {
+                sendCommand();
+            }
+        });
         
         // Handle keyboard input
         consoleInput.addEventListener('keydown', (e) => {
+            // Don't process keys if input is disabled
+            if (consoleInput.disabled) {
+                e.preventDefault();
+                return false;
+            }
+            
             if (e.key === 'ArrowUp') {
                 e.preventDefault(); // Prevent cursor from moving to start of input
                 e.stopPropagation(); // Prevent any other handlers

