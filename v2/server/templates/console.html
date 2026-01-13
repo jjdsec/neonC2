@@ -33,10 +33,31 @@
         {% if host %}
         <div class="console-line info">Available commands:</div>
         <div class="console-line info">  cd [directory] - Change working directory (stateful)</div>
+        <div class="console-line info">  /get &lt;filepath&gt; - Upload file from client to server</div>
         <div class="console-line info">  /deregister - Deregister and exit client</div>
         <div class="console-line info">  /delete - Deregister, delete executable, and exit client</div>
         <div class="console-line info">  /set-idle-timeout &lt;cycles&gt; - Set idle timeout (default: 5)</div>
         <div class="console-line info">  /set-sync-frequency &lt;seconds&gt; - Set sync frequency (default: 5)</div>
+        
+        <div class="console-line" style="margin-top: 20px; border-top: 1px solid #444; padding-top: 10px;">
+            <strong style="color: #4ec9b0;">Uploaded Files</strong> 
+            <span style="color: #888; font-size: 11px;">(Files uploaded from this host)</span>
+        </div>
+        <div class="uploaded-files-list" id="uploadedFilesList">
+            {% if uploaded_files and uploaded_files|length > 0 %}
+            {% for file in uploaded_files %}
+            <div class="uploaded-file-item" data-filename="{{ file.filename }}">
+                <span class="file-name" title="{{ file.filename }}">{{ file.filename }}</span>
+                <span class="file-size">{{ "%.2f"|format(file.size / 1024) }} KB</span>
+                <span class="file-date">{{ file.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') if file.uploaded_at else '' }}</span>
+                <a href="/api/hosts/{{ host.id }}/files/{{ file.filename }}" class="download-link" download target="_blank">⬇ Download</a>
+                <button class="delete-file-link" data-filename="{{ file.filename }}" title="Delete file">🗑 Delete</button>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="console-line" style="color: #888; font-style: italic; padding: 10px;">No files uploaded yet. Use /get &lt;filepath&gt; to upload a file.</div>
+            {% endif %}
+        </div>
         {% if commands %}
         <div class="console-line" style="margin-top: 20px; border-top: 1px solid #444; padding-top: 10px;">Recent Commands:</div>
         {% for cmd in commands %}
@@ -261,6 +282,94 @@
         color: #888;
         font-size: 11px;
         margin-top: 5px;
+    }
+
+    .uploaded-files-list {
+        margin-top: 10px;
+        margin-bottom: 15px;
+        max-height: 400px;
+        overflow-y: auto;
+        padding: 5px;
+        background: #1a1a1a;
+        border-radius: 6px;
+        border: 1px solid #333;
+    }
+
+    .uploaded-file-item {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 10px 12px;
+        background: #2d2d2d;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        font-size: 13px;
+        border-left: 3px solid #667eea;
+        transition: background 0.2s ease;
+    }
+
+    .uploaded-file-item:hover {
+        background: #353535;
+    }
+
+    .file-name {
+        flex: 1;
+        color: #4ec9b0;
+        font-family: monospace;
+        word-break: break-all;
+        font-weight: 500;
+        min-width: 200px;
+    }
+
+    .file-size {
+        color: #888;
+        font-size: 12px;
+        min-width: 80px;
+        text-align: right;
+    }
+
+    .file-date {
+        color: #888;
+        font-size: 11px;
+        min-width: 150px;
+    }
+
+    .download-link {
+        padding: 6px 16px;
+        background: #667eea;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+        display: inline-block;
+    }
+
+    .download-link:hover {
+        background: #5568d3;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+    }
+
+    .delete-file-link {
+        padding: 6px 16px;
+        background: #f44336;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+    }
+
+    .delete-file-link:hover {
+        background: #da190b;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(244, 67, 54, 0.4);
     }
 
     .console-input-container {
@@ -554,10 +663,13 @@
                                 addConsoleLine(`Exit code: ${cmd.exit_code}`, cmd.exit_code === 0 ? 'success' : 'error');
                             }
                             
-                            // Reload page to show updated command history after a short delay
+                            // Check if this was a /get command to refresh file list
+                            const wasGetCommand = cmd.command && cmd.command.startsWith('/get ');
+                            
+                            // Reload page to show updated command history and files after a short delay
                             setTimeout(() => {
                                 window.location.reload();
-                            }, 1500);
+                            }, wasGetCommand ? 2000 : 1500); // Longer delay for file uploads to ensure file is saved
                             return;
                         }
                     }
@@ -591,6 +703,50 @@
         }
         startAutoRefresh();
         {% endif %}
+
+        // Set up file deletion handlers
+        document.addEventListener('click', async function(e) {
+            if (e.target && e.target.classList.contains('delete-file-link')) {
+                e.preventDefault();
+                const filename = e.target.getAttribute('data-filename');
+                const fileItem = e.target.closest('.uploaded-file-item');
+                
+                if (!confirm(`Are you sure you want to delete "${filename}"?`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/api/hosts/{{ host.id }}/files/${encodeURIComponent(filename)}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        // Remove the file item from the DOM
+                        if (fileItem) {
+                            fileItem.style.opacity = '0.5';
+                            fileItem.style.transition = 'opacity 0.3s';
+                            setTimeout(() => {
+                                fileItem.remove();
+                                // If no files left, show message
+                                const filesList = document.getElementById('uploadedFilesList');
+                                if (filesList && filesList.children.length === 0) {
+                                    filesList.innerHTML = '<div class="console-line" style="color: #888; font-style: italic; padding: 10px;">No files uploaded yet. Use /get &lt;filepath&gt; to upload a file.</div>';
+                                }
+                            }, 300);
+                        }
+                        addConsoleLine(`File "${filename}" deleted successfully.`, 'success');
+                    } else {
+                        const error = await response.json();
+                        addConsoleLine(`Error deleting file: ${error.error || 'Unknown error'}`, 'error');
+                    }
+                } catch (error) {
+                    addConsoleLine(`Error deleting file: ${error.message}`, 'error');
+                }
+            }
+        });
 
         // Set up event listeners
         sendButton.addEventListener('click', () => {

