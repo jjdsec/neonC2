@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Register Host - NeonC2 Server{% endblock %}
+
+{% block header_title %}Register New Host{% endblock %}
+
+{% block body %}
+<div class="register-host-container">
+    <div class="register-host-box">
+        <h2>Manual Host Registration</h2>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        
+        <form method="POST" action="{{ url_for('register_host') }}" class="register-host-form">
+            <div class="form-group">
+                <label for="hostname">Hostname *</label>
+                <input type="text" id="hostname" name="hostname" required autofocus placeholder="e.g., workstation-01">
+            </div>
+            
+            <div class="form-group">
+                <label for="ip_address">IP Address *</label>
+                <input type="text" id="ip_address" name="ip_address" required placeholder="e.g., 192.168.1.100">
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="os_type">OS Type</label>
+                    <select id="os_type" name="os_type">
+                        <option value="linux">Linux</option>
+                        <option value="windows">Windows</option>
+                        <option value="darwin">macOS</option>
+                        <option value="unknown">Unknown</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="architecture">Architecture</label>
+                    <select id="architecture" name="architecture">
+                        <option value="">Select...</option>
+                        <option value="amd64">amd64</option>
+                        <option value="arm64">arm64</option>
+                        <option value="386">386</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="os_version">OS Version</label>
+                <input type="text" id="os_version" name="os_version" placeholder="e.g., Ubuntu 22.04">
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="submit-button">Register Host</button>
+                <a href="{{ url_for('hosts') }}" class="cancel-button">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .register-host-container {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        min-height: 500px;
+        padding: 20px;
+    }
+
+    .register-host-box {
+        width: 100%;
+        max-width: 600px;
+        background: white;
+        padding: 40px;
+        border-radius: 12px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .register-host-box h2 {
+        color: #667eea;
+        margin-bottom: 30px;
+        text-align: center;
+        font-size: 28px;
+    }
+
+    .flash-messages {
+        margin-bottom: 20px;
+    }
+
+    .flash-message {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        font-size: 14px;
+    }
+
+    .flash-error {
+        background: #fee;
+        color: #c33;
+        border: 1px solid #fcc;
+    }
+
+    .flash-success {
+        background: #efe;
+        color: #3c3;
+        border: 1px solid #cfc;
+    }
+
+    .register-host-form {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: #333;
+        font-weight: 500;
+        font-size: 14px;
+    }
+
+    .form-group input[type="text"],
+    .form-group select {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s ease;
+    }
+
+    .form-group input[type="text"]:focus,
+    .form-group select:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 15px;
+        margin-top: 10px;
+    }
+
+    .submit-button {
+        flex: 1;
+        padding: 14px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.3s ease;
+    }
+
+    .submit-button:hover {
+        background: #5568d3;
+    }
+
+    .cancel-button {
+        flex: 1;
+        padding: 14px;
+        background: #f5f5f5;
+        color: #666;
+        text-decoration: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        text-align: center;
+        transition: background 0.3s ease;
+    }
+
+    .cancel-button:hover {
+        background: #e0e0e0;
+    }
+</style>
+{% endblock %}

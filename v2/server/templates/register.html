@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Register - NeonC2 Server{% endblock %}
+
+{% block header_title %}NeonC2 Server Registration{% endblock %}
+
+{% block nav_links %}
+{% endblock %}
+
+{% block body %}
+<div class="register-container">
+    <div class="register-box">
+        <h2>Create Account</h2>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        
+        <form method="POST" action="{{ url_for('register') }}" class="register-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus>
+            </div>
+            
+            <div class="form-group">
+                <label for="email">Email (Optional)</label>
+                <input type="email" id="email" name="email">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password_confirm">Confirm Password</label>
+                <input type="password" id="password_confirm" name="password_confirm" required>
+            </div>
+            
+            <button type="submit" class="submit-button">Register</button>
+        </form>
+        
+        <div class="register-footer">
+            <p>Already have an account? <a href="{{ url_for('login') }}">Sign in here</a></p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .register-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 500px;
+    }
+
+    .register-box {
+        width: 100%;
+        max-width: 400px;
+        background: white;
+        padding: 40px;
+        border-radius: 12px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .register-box h2 {
+        color: #667eea;
+        margin-bottom: 30px;
+        text-align: center;
+        font-size: 28px;
+    }
+
+    .flash-messages {
+        margin-bottom: 20px;
+    }
+
+    .flash-message {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        font-size: 14px;
+    }
+
+    .flash-error {
+        background: #fee;
+        color: #c33;
+        border: 1px solid #fcc;
+    }
+
+    .flash-success {
+        background: #efe;
+        color: #3c3;
+        border: 1px solid #cfc;
+    }
+
+    .register-form {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: #333;
+        font-weight: 500;
+        font-size: 14px;
+    }
+
+    .form-group input[type="text"],
+    .form-group input[type="email"],
+    .form-group input[type="password"] {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s ease;
+    }
+
+    .form-group input[type="text"]:focus,
+    .form-group input[type="email"]:focus,
+    .form-group input[type="password"]:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    .submit-button {
+        width: 100%;
+        padding: 14px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.3s ease;
+        margin-top: 10px;
+    }
+
+    .submit-button:hover {
+        background: #5568d3;
+    }
+
+    .submit-button:active {
+        transform: scale(0.98);
+    }
+
+    .register-footer {
+        margin-top: 20px;
+        text-align: center;
+        font-size: 14px;
+        color: #666;
+    }
+
+    .register-footer a {
+        color: #667eea;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .register-footer a:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,9 @@
+flask
+flask-cors
+flask-sqlalchemy
+flask-login
+flask-migrate
+requests
+bcrypt
+jinja2
+python-dotenv

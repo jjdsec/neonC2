@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+
+{% block title %}Hosts - NeonC2 Server{% endblock %}
+
+{% block header_title %}Registered Hosts{% endblock %}
+
+{% block body %}
+<div class="hosts-container">
+    <div class="hosts-header">
+        <h2>Registered Hosts</h2>
+        <div class="hosts-actions">
+            <a href="{{ url_for('register_host') }}" class="btn-register">Register Host</a>
+            <a href="#downloads" class="btn-download" onclick="showDownloads()">Download Client</a>
+            <div class="hosts-stats">
+                <span class="stat-item">Total: <strong>{{ hosts|length }}</strong></span>
+                <span class="stat-item">Active: <strong>{{ hosts|selectattr('is_active')|list|length }}</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <div id="downloads-section" style="display: none; margin-bottom: 30px; padding: 20px; background: #f5f5f5; border-radius: 8px;">
+        <h3>Download Client Binaries</h3>
+        <div class="download-grid">
+            <div class="download-item">
+                <strong>Linux</strong>
+                <a href="/api/download/linux/amd64" target="_blank">amd64</a>
+                <a href="/api/download/linux/arm64" target="_blank">arm64</a>
+                <a href="/api/download/linux/386" target="_blank">386</a>
+            </div>
+            <div class="download-item">
+                <strong>Windows</strong>
+                <a href="/api/download/windows/amd64" target="_blank">amd64</a>
+                <a href="/api/download/windows/386" target="_blank">386</a>
+            </div>
+            <div class="download-item">
+                <strong>macOS</strong>
+                <a href="/api/download/darwin/amd64" target="_blank">amd64</a>
+                <a href="/api/download/darwin/arm64" target="_blank">arm64</a>
+            </div>
+        </div>
+        <p style="margin-top: 15px; font-size: 12px; color: #666;">
+            Note: Build the client binaries first using the build script in the clients directory.
+        </p>
+    </div>
+
+    {% if hosts %}
+    <div class="hosts-grid" id="hostsGrid">
+        {% for host in hosts %}
+        <div class="host-card {% if not host.is_active %}inactive{% endif %} {% if host.is_idle %}idle{% endif %}" data-host-id="{{ host.id }}">
+            <div class="host-card-header">
+                <h3 class="host-hostname">{{ host.hostname }}</h3>
+                <span class="host-status {% if host.is_active and not host.is_idle %}active{% elif host.is_idle %}idle{% else %}inactive{% endif %}" data-status>
+                    {% if host.is_active and not host.is_idle %}● Active{% elif host.is_idle %}⚠ Idle{% else %}○ Inactive{% endif %}
+                </span>
+            </div>
+            <div class="host-card-body">
+                <div class="host-info">
+                    <div class="info-row">
+                        <span class="info-label">IP Address:</span>
+                        <span class="info-value host-ip">{{ host.ip_address }}</span>
+                    </div>
+                    {% if host.os_type %}
+                    <div class="info-row">
+                        <span class="info-label">OS:</span>
+                        <span class="info-value host-os">{{ host.os_type }}{% if host.os_version %} {{ host.os_version }}{% endif %}</span>
+                    </div>
+                    {% endif %}
+                    <div class="info-row">
+                        <span class="info-label">Last Seen:</span>
+                        <span class="info-value host-last-seen" data-last-seen="{{ host.last_seen.isoformat() if host.last_seen else '' }}">
+                            {{ host.last_seen.strftime('%Y-%m-%d %H:%M:%S') if host.last_seen else 'Never' }}
+                        </span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">First Seen:</span>
+                        <span class="info-value">{{ host.first_seen.strftime('%Y-%m-%d %H:%M:%S') if host.first_seen else 'Unknown' }}</span>
+                    </div>
+                    <div class="info-row missed-cycles-row" style="display: none;">
+                        <span class="info-label">Missed Cycles:</span>
+                        <span class="info-value warning host-missed-cycles">0/{{ host.idle_timeout_cycles or 5 }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Idle Timeout:</span>
+                        <span class="info-value host-idle-timeout">{{ host.idle_timeout_cycles or 5 }} cycles</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Sync Frequency:</span>
+                        <span class="info-value host-sync-freq">{{ host.sync_frequency or 5 }}s</span>
+                    </div>
+                    {% if host.hardware_id %}
+                    <div class="info-row">
+                        <span class="info-label">Hardware ID:</span>
+                        <span class="info-value" style="font-size: 11px; font-family: monospace;">{{ host.hardware_id[:20] }}...</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="host-card-footer">
+                <a href="{{ url_for('console', host_id=host.id) }}" class="btn-primary">Open Console</a>
+                <form method="POST" action="{{ url_for('delete_host', host_id=host.id) }}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this host?');">
+                    <button type="submit" class="btn-delete">Delete</button>
+                </form>
+                <span class="host-id">ID: {{ host.id[:8] }}...</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No hosts registered yet.</p>
+        <p class="empty-hint">Hosts will appear here when they connect to the server.</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .hosts-container {
+        width: 100%;
+    }
+
+    .hosts-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #e0e0e0;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+
+    .hosts-actions {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+    }
+
+    .btn-register {
+        padding: 10px 20px;
+        background: #4caf50;
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 14px;
+        transition: background 0.3s ease;
+    }
+
+    .btn-register:hover {
+        background: #45a049;
+    }
+
+    .btn-download {
+        padding: 10px 20px;
+        background: #667eea;
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 14px;
+        transition: background 0.3s ease;
+    }
+
+    .btn-download:hover {
+        background: #5568d3;
+    }
+
+    .btn-delete {
+        padding: 8px 16px;
+        background: #f44336;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.3s ease;
+    }
+
+    .btn-delete:hover {
+        background: #da190b;
+    }
+
+    .info-value.warning {
+        color: #ff9800;
+        font-weight: 600;
+    }
+
+    .download-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .download-item {
+        padding: 15px;
+        background: white;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .download-item strong {
+        color: #333;
+        margin-bottom: 5px;
+    }
+
+    .download-item a {
+        color: #667eea;
+        text-decoration: none;
+        padding: 5px 10px;
+        border: 1px solid #667eea;
+        border-radius: 4px;
+        transition: all 0.3s ease;
+    }
+
+    .download-item a:hover {
+        background: #667eea;
+        color: white;
+    }
+
+    .hosts-header h2 {
+        color: #667eea;
+        font-size: 28px;
+        margin: 0;
+    }
+
+    .hosts-stats {
+        display: flex;
+        gap: 20px;
+    }
+
+    .stat-item {
+        color: #666;
+        font-size: 14px;
+    }
+
+    .stat-item strong {
+        color: #667eea;
+        font-weight: 600;
+    }
+
+    .hosts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 20px;
+    }
+
+    .host-card {
+        background: white;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 20px;
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .host-card:hover {
+        border-color: #667eea;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        transform: translateY(-2px);
+    }
+
+    .host-card.inactive {
+        opacity: 0.7;
+        border-color: #ccc;
+    }
+
+    .host-card.idle {
+        border-color: #ff9800;
+        background: #fff8f0;
+    }
+
+    .host-card.idle:hover {
+        border-color: #f57c00;
+        box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2);
+    }
+
+    .host-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .host-card-header h3 {
+        margin: 0;
+        color: #333;
+        font-size: 20px;
+        font-weight: 600;
+    }
+
+    .host-status {
+        font-size: 12px;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-weight: 500;
+    }
+
+    .host-status.active {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .host-status.inactive {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .host-status.idle {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .host-card-body {
+        flex: 1;
+        margin-bottom: 15px;
+    }
+
+    .host-info {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 14px;
+    }
+
+    .info-label {
+        color: #666;
+        font-weight: 500;
+    }
+
+    .info-value {
+        color: #333;
+        font-family: 'Courier New', monospace;
+    }
+
+    .host-card-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 15px;
+        border-top: 1px solid #f0f0f0;
+    }
+
+    .btn-primary {
+        padding: 10px 20px;
+        background: #667eea;
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 14px;
+        transition: background 0.3s ease;
+    }
+
+    .btn-primary:hover {
+        background: #5568d3;
+    }
+
+    .host-id {
+        font-size: 11px;
+        color: #999;
+        font-family: 'Courier New', monospace;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #666;
+    }
+
+    .empty-state p {
+        margin: 10px 0;
+        font-size: 16px;
+    }
+
+    .empty-hint {
+        font-size: 14px;
+        color: #999;
+    }
+</style>
+
+<script>
+    function showDownloads() {
+        const section = document.getElementById('downloads-section');
+        if (section.style.display === 'none') {
+            section.style.display = 'block';
+        } else {
+            section.style.display = 'none';
+        }
+    }
+
+    // Real-time host status updates
+    let updateInterval = null;
+    
+    function updateHostStatus() {
+        fetch('/api/hosts')
+            .then(response => response.json())
+            .then(hosts => {
+                hosts.forEach(host => {
+                    const hostCard = document.querySelector(`[data-host-id="${host.id}"]`);
+                    if (!hostCard) return;
+                    
+                    // Update status
+                    const statusEl = hostCard.querySelector('[data-status]');
+                    if (statusEl) {
+                        if (host.is_active && !host.is_idle) {
+                            statusEl.className = 'host-status active';
+                            statusEl.textContent = '● Active';
+                        } else if (host.is_idle) {
+                            statusEl.className = 'host-status idle';
+                            statusEl.textContent = '⚠ Idle';
+                        } else {
+                            statusEl.className = 'host-status inactive';
+                            statusEl.textContent = '○ Inactive';
+                        }
+                    }
+                    
+                    // Update card classes
+                    hostCard.className = 'host-card';
+                    if (!host.is_active) hostCard.classList.add('inactive');
+                    if (host.is_idle) hostCard.classList.add('idle');
+                    
+                    // Update last seen
+                    const lastSeenEl = hostCard.querySelector('.host-last-seen');
+                    if (lastSeenEl && host.last_seen) {
+                        const lastSeen = new Date(host.last_seen);
+                        lastSeenEl.textContent = lastSeen.toLocaleString('en-US', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                    }
+                    
+                    // Update missed cycles (time-based calculation)
+                    const missedCyclesEl = hostCard.querySelector('.host-missed-cycles');
+                    const missedCyclesRow = hostCard.querySelector('.missed-cycles-row');
+                    const idleTimeout = host.idle_timeout_cycles || 5;
+                    
+                    if (missedCyclesEl && host.missed_cycles !== undefined) {
+                        if (host.missed_cycles > 0) {
+                            missedCyclesEl.textContent = `${host.missed_cycles}/${idleTimeout}`;
+                            if (missedCyclesRow) missedCyclesRow.style.display = 'flex';
+                            
+                            // Add warning class if approaching timeout
+                            if (host.missed_cycles >= idleTimeout * 0.8) {
+                                missedCyclesEl.classList.add('warning');
+                            }
+                        } else {
+                            if (missedCyclesRow) missedCyclesRow.style.display = 'none';
+                        }
+                    }
+                });
+                
+                // Update stats
+                const totalHosts = hosts.length;
+                const activeHosts = hosts.filter(h => h.is_active && !h.is_idle).length;
+                const statItems = document.querySelectorAll('.stat-item');
+                if (statItems.length >= 2) {
+                    statItems[0].innerHTML = `Total: <strong>${totalHosts}</strong>`;
+                    statItems[1].innerHTML = `Active: <strong>${activeHosts}</strong>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error updating host status:', error);
+            });
+    }
+    
+    // Start auto-update when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Update immediately
+        updateHostStatus();
+        
+        // Then update every 3 seconds
+        updateInterval = setInterval(updateHostStatus, 3000);
+    });
+    
+    // Clean up on page unload
+    window.addEventListener('beforeunload', function() {
+        if (updateInterval) {
+            clearInterval(updateInterval);
+        }
+    });
+</script>
+{% endblock %}

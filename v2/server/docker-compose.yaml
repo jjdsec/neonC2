@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neonc2-server
+    image: neonc2-server:latest
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/app
+      - neonc2_data:/app/data
+    working_dir: /app
+    command: python3 app.py
+
+volumes:
+  neonc2_data:
+    driver: local
