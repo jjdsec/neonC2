@@ -5,7 +5,8 @@
 NeonC2 is a new version of the NeonC2 project. It is a command-and-control (C2) software and protocol that allows for the control of a computer over a network.
 
 ## Features
-- encrypted communication
+- stateful path management
 - multiple clients
-- web interface
-- jittered beaconing
+- web CLI
+- modifying beacon interval and timeout
+- hardware IDs used to identify nodes rather than IP or ephemeral UUID
